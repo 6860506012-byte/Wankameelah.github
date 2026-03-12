@@ -7,11 +7,9 @@ $dbname   = getenv('DB_NAME') ?: "trees_db";
 
 $conn = new mysqli($host, $username, $password);
 
-// ตรวจสอบการเชื่อมต่อ
 if ($conn->connect_error) {
     $db_status = "❌ Connection Failed: " . $conn->connect_error;
 } else {
-    // 2. สร้าง DB และ Table อัตโนมัติ (คะแนนข้อ 3)
     $conn->query("CREATE DATABASE IF NOT EXISTS $dbname");
     $conn->select_db($dbname);
     
@@ -24,29 +22,26 @@ if ($conn->connect_error) {
     $db_status = "✅ Connected to MariaDB ($host)";
 }
 
-// 3. ส่วนของการจัดการข้อมูล (Add/Delete) - แก้ไขบั๊กเลข 0 โดยการเช็คค่าว่าง
+// 3. ส่วนจัดการข้อมูล (ปรับให้ตรงกับ AJAX ที่ JS ส่งมา)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['add_val']) && $_POST['add_val'] !== "") {
-        $val = (int)$_POST['add_val'];
-        $conn->query("INSERT INTO bst_nodes (node_value) VALUES ($val)");
-    } elseif (isset($_POST['del_val']) && $_POST['del_val'] !== "") {
-        $val = (int)$_POST['del_val'];
-        $conn->query("DELETE FROM bst_nodes WHERE node_value = $val");
+    if (isset($_POST['action'])) {
+        if ($_POST['action'] === 'add' && $_POST['value'] !== "") {
+            $val = (int)$_POST['value'];
+            $conn->query("INSERT INTO bst_nodes (node_value) VALUES ($val)");
+        } elseif ($_POST['action'] === 'clear') {
+            $conn->query("TRUNCATE TABLE bst_nodes");
+        }
+        exit(); // จบการทำงานสำหรับ AJAX
     }
-    header("Location: " . $_SERVER['PHP_SELF']); 
-    exit();
 }
 
-// 4. ดึงข้อมูลจากฐานข้อมูลมาวาดต้นไม้
+// 4. ดึงข้อมูล
 $db_nodes = [];
 $res = $conn->query("SELECT node_value FROM bst_nodes ORDER BY id ASC");
 if ($res && $res->num_rows > 0) {
     while ($row = $res->fetch_assoc()) {
         $db_nodes[] = (int)$row['node_value'];
     }
-} else {
-    // ถ้า DB ว่าง ให้แสดงตัวอย่างตั้งต้น
-    $db_nodes = [50, 30, 70, 20, 40, 60, 80]; 
 }
 ?>
 
@@ -56,27 +51,31 @@ if ($res && $res->num_rows > 0) {
     <meta charset="UTF-8">
     <title>Binary Tree PHP + MariaDB</title>
     <style>
-        /* CSS เดิมของคุณ */
         :root { --bg-color: #fcfcfc; --text-main: #2d3436; --accent-green: #6ab04c; --node-border: #dfe6e9; }
         body { margin: 0; padding: 40px 20px; display: flex; flex-direction: column; align-items: center; background-color: var(--bg-color); font-family: 'Tahoma', sans-serif; }
-        .container { width: 100%; max-width: 800px; background: #ffffff; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.02); text-align: center; }
-        h1 { font-weight: 300; color: #ff7675; }
+        .container { width: 100%; max-width: 800px; background: #ffffff; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.02); text-align: center; border: 1px solid #eee; }
+        h1 { font-weight: 300; color: #ff7675; margin-bottom: 5px; }
+        .db-status { font-size: 12px; color: #95a5a6; margin-bottom: 20px; }
         .input-group { margin-bottom: 30px; display: flex; justify-content: center; gap: 10px; }
-        input { padding: 10px; border: 1px solid var(--node-border); border-radius: 8px; width: 70px; text-align: center; }
-        button { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; }
+        input { padding: 10px; border: 1px solid var(--node-border); border-radius: 8px; width: 80px; text-align: center; outline: none; }
+        button { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; }
         .btn-add { background-color: #ff7675; color: white; }
+        .btn-add:hover { background-color: #ff5e57; transform: scale(1.05); }
         .btn-clear { background-color: #dfe6e9; color: #636e72; }
-        canvas { width: 100%; height: auto; }
-        .results-section { margin-top: 30px; text-align: left; border-top: 1px solid #eee; padding-top: 20px; }
-        .result-item b { color: var(--accent-green); }
+        canvas { width: 100%; height: auto; border-bottom: 1px solid #f5f5f5; }
+        .results-section { margin-top: 30px; text-align: left; padding-top: 10px; }
+        .result-item { margin-bottom: 10px; font-size: 14px; }
+        .result-item b { color: var(--accent-green); display: inline-block; width: 100px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎄 Binary Tree PHP 🎄</h1>
+    <h1>🎄 Binary Tree 🎄</h1>
+    <div class="db-status"><?php echo $db_status; ?></div>
+    
     <div class="input-group">
-        <input type="number" id="nodeInput" placeholder="เลข">
+        <input type="number" id="nodeInput" placeholder="ใส่เลข">
         <button class="btn-add" onclick="addNode()">ปลูก Node</button>
         <button class="btn-clear" onclick="resetTree()">ล้างสวน</button>
     </div>
@@ -96,72 +95,78 @@ if ($res && $res->num_rows > 0) {
     const canvas = document.getElementById('treeCanvas');
     const ctx = canvas.getContext('2d');
 
-    // ดึงข้อมูลที่ PHP ดึงจาก DB มาเตรียมไว้ใน JS
-    const dbValues = <?php echo json_encode($nodes_from_db); ?>;
+    // แก้ไข: ใช้ชื่อตัวแปร $db_nodes ให้ตรงกับ PHP
+    const dbValues = <?php echo json_encode($db_nodes); ?>;
 
     window.onload = () => {
-        dbValues.forEach(v => buildLocally(v));
-        render();
+        if(dbValues.length > 0) {
+            dbValues.forEach(v => buildLocally(v));
+            render();
+        }
     };
 
     function buildLocally(v) {
         if (!root) root = new Node(v);
-        else insertNode(root, v);
+        else insertRecursive(root, v);
     }
 
-    function insertNode(node, v) {
+    function insertRecursive(node, v) {
         if (v < node.val) {
-            if (!node.left) node.left = new Node(v); else insertNode(node.left, v);
-        } else {
-            if (!node.right) node.right = new Node(v); else insertNode(node.right, v);
+            if (!node.left) node.left = new Node(v); else insertRecursive(node.left, v);
+        } else if (v > node.val) {
+            if (!node.right) node.right = new Node(v); else insertRecursive(node.right, v);
         }
     }
 
     async function addNode() {
-        const val = document.getElementById('nodeInput').value;
+        const valInput = document.getElementById('nodeInput');
+        const val = valInput.value;
         if (val === "") return;
 
-        // ส่งค่าไปบันทึกใน PHP (Database) แบบ AJAX
         let formData = new FormData();
         formData.append('action', 'add');
         formData.append('value', val);
         
-        await fetch('index.php', { method: 'POST', body: formData });
+        // ส่งไปที่ไฟล์ตัวเอง
+        await fetch(window.location.href, { method: 'POST', body: formData });
         
         buildLocally(parseInt(val));
-        document.getElementById('nodeInput').value = '';
+        valInput.value = '';
         render();
     }
 
     async function resetTree() {
-        if(!confirm("ลบข้อมูลใน Database?")) return;
+        if(!confirm("ต้องการล้างข้อมูลทั้งหมดใช่หรือไม่?")) return;
         let formData = new FormData();
         formData.append('action', 'clear');
-        await fetch('index.php', { method: 'POST', body: formData });
+        await fetch(window.location.href, { method: 'POST', body: formData });
         root = null;
         render();
     }
 
     function render() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (root) draw(root, canvas.width / 2, 40, 160);
+        if (root) draw(root, canvas.width / 2, 40, 180);
         updateTraversalText();
     }
 
     function draw(node, x, y, space) {
+        ctx.lineWidth = 2;
         ctx.strokeStyle = "#dfe6e9";
         if (node.left) {
             ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - space, y + 70); ctx.stroke();
-            draw(node.left, x - space, y + 70, space / 1.8);
+            draw(node.left, x - space, y + 70, space / 2);
         }
         if (node.right) {
             ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + space, y + 70); ctx.stroke();
-            draw(node.right, x + space, y + 70, space / 1.8);
+            draw(node.right, x + space, y + 70, space / 2);
         }
+        
         ctx.beginPath(); ctx.arc(x, y, 18, 0, Math.PI * 2);
         ctx.fillStyle = "white"; ctx.fill();
         ctx.strokeStyle = "#ff7675"; ctx.stroke();
-        ctx.fillStyle = "#2d3436"; ctx.font = "12px Arial"; ctx.textAlign = "center";
+        
+        ctx.fillStyle = "#2d3436"; ctx.font = "bold 12px Arial"; ctx.textAlign = "center";
         ctx.fillText(node.val, x, y + 5);
     }
 
