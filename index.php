@@ -2,7 +2,7 @@
 // --- 1. ส่วนเชื่อมต่อฐานข้อมูล ---
 $host     = getenv('DB_HOST') ?: "wandb-mariadb-yljllb"; 
 $username = getenv('DB_USER') ?: "wan";
-$password = getenv('DB_PASS') ?: "Wan_2004";
+$password = getenv('DB_PASS') ?: "Wan_2007";
 $dbname   = getenv('DB_NAME') ?: "trees_db";
 
 $conn = new mysqli($host, $username, $password);
