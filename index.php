@@ -1,33 +1,52 @@
 <?php
-// --- 1. ส่วนเชื่อมต่อฐานข้อมูล MariaDB ---
-$host = 'localhost'; // หรือชื่อ Service ใน Dokploy
-$user = 'root';
-$pass = ''; // รหัสผ่านของคุณ
-$db   = 'tree_db';
+// --- 1. ส่วนเชื่อมต่อฐานข้อมูล ---
+$host     = getenv('DB_HOST') ?: "wandb-mariadb-yljllb"; 
+$username = getenv('DB_USER') ?: "wan";
+$password = getenv('DB_PASS') ?: "Wan_2004";
+$dbname   = getenv('DB_NAME') ?: "trees_db";
 
-$conn = new mysqli($host, $user, $pass, $db);
-if ($conn->connect_error) { die("Connection failed: " . $conn->connect_error); }
+$conn = new mysqli($host, $username, $password);
 
-// --- 2. ส่วนจัดการ Logic (API ภายในไฟล์เดียว) ---
-
-// ถ้ามีการส่งค่ามาปลูก Node (POST)
-if (isset($_POST['action']) && $_POST['action'] == 'add') {
-    $val = intval($_POST['value']);
-    $conn->query("INSERT INTO tree_nodes (node_value) VALUES ($val)");
-    exit;
+// ตรวจสอบการเชื่อมต่อ
+if ($conn->connect_error) {
+    $db_status = "❌ Connection Failed: " . $conn->connect_error;
+} else {
+    // 2. สร้าง DB และ Table อัตโนมัติ (คะแนนข้อ 3)
+    $conn->query("CREATE DATABASE IF NOT EXISTS $dbname");
+    $conn->select_db($dbname);
+    
+    $sql_create_table = "CREATE TABLE IF NOT EXISTS bst_nodes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        node_value INT NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )";
+    $conn->query($sql_create_table);
+    $db_status = "✅ Connected to MariaDB ($host)";
 }
 
-// ถ้ามีการสั่งล้างสวน (DELETE)
-if (isset($_POST['action']) && $_POST['action'] == 'clear') {
-    $conn->query("TRUNCATE TABLE tree_nodes");
-    exit;
+// 3. ส่วนของการจัดการข้อมูล (Add/Delete) - แก้ไขบั๊กเลข 0 โดยการเช็คค่าว่าง
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['add_val']) && $_POST['add_val'] !== "") {
+        $val = (int)$_POST['add_val'];
+        $conn->query("INSERT INTO bst_nodes (node_value) VALUES ($val)");
+    } elseif (isset($_POST['del_val']) && $_POST['del_val'] !== "") {
+        $val = (int)$_POST['del_val'];
+        $conn->query("DELETE FROM bst_nodes WHERE node_value = $val");
+    }
+    header("Location: " . $_SERVER['PHP_SELF']); 
+    exit();
 }
 
-// ดึงข้อมูล Node ทั้งหมดออกมาเพื่อรอวาด (GET)
-$result = $conn->query("SELECT node_value FROM tree_nodes ORDER BY id ASC");
-$nodes_from_db = [];
-while($row = $result->fetch_assoc()) {
-    $nodes_from_db[] = $row['node_value'];
+// 4. ดึงข้อมูลจากฐานข้อมูลมาวาดต้นไม้
+$db_nodes = [];
+$res = $conn->query("SELECT node_value FROM bst_nodes ORDER BY id ASC");
+if ($res && $res->num_rows > 0) {
+    while ($row = $res->fetch_assoc()) {
+        $db_nodes[] = (int)$row['node_value'];
+    }
+} else {
+    // ถ้า DB ว่าง ให้แสดงตัวอย่างตั้งต้น
+    $db_nodes = [50, 30, 70, 20, 40, 60, 80]; 
 }
 ?>
 
@@ -159,4 +178,3 @@ while($row = $result->fetch_assoc()) {
 
 </body>
 </html>
-
