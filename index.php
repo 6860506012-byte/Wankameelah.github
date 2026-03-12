@@ -8,7 +8,7 @@ $dbname   = getenv('DB_NAME') ?: "trees_db";
 $conn = new mysqli($host, $username, $password);
 
 if ($conn->connect_error) {
-    $db_status = "❌ Connection Failed: " . $conn->connect_error;
+    $db_status = "❌ Connection Failed";
 } else {
     $conn->query("CREATE DATABASE IF NOT EXISTS $dbname");
     $conn->select_db($dbname);
@@ -19,23 +19,27 @@ if ($conn->connect_error) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )";
     $conn->query($sql_create_table);
-    $db_status = "✅ Connected to MariaDB ($host)";
+    $db_status = "✅ Connected to MariaDB";
 }
 
-// 3. ส่วนจัดการข้อมูล (ปรับให้ตรงกับ AJAX ที่ JS ส่งมา)
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['action'])) {
-        if ($_POST['action'] === 'add' && $_POST['value'] !== "") {
-            $val = (int)$_POST['value'];
-            $conn->query("INSERT INTO bst_nodes (node_value) VALUES ($val)");
-        } elseif ($_POST['action'] === 'clear') {
-            $conn->query("TRUNCATE TABLE bst_nodes");
-        }
-        exit(); // จบการทำงานสำหรับ AJAX
+// --- 2. ส่วนจัดการข้อมูล (AJAX Handling) ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    header('Content-Type: application/json');
+    if ($_POST['action'] === 'add' && isset($_POST['value'])) {
+        $val = (int)$_POST['value'];
+        // ใช้ INSERT IGNORE เพื่อป้องกัน Error กรณีค่าซ้ำ (Unique Constraint)
+        $stmt = $conn->prepare("INSERT IGNORE INTO bst_nodes (node_value) VALUES (?)");
+        $stmt->bind_param("i", $val);
+        $stmt->execute();
+        echo json_encode(["status" => "success"]);
+    } elseif ($_POST['action'] === 'clear') {
+        $conn->query("TRUNCATE TABLE bst_nodes");
+        echo json_encode(["status" => "cleared"]);
     }
+    exit(); // หยุดการทำงานเพื่อไม่ให้แสดง HTML ใน AJAX Response
 }
 
-// 4. ดึงข้อมูล
+// --- 3. ดึงข้อมูลมาแสดงผลตอนโหลดหน้า ---
 $db_nodes = [];
 $res = $conn->query("SELECT node_value FROM bst_nodes ORDER BY id ASC");
 if ($res && $res->num_rows > 0) {
@@ -50,121 +54,82 @@ if ($res && $res->num_rows > 0) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minimal Binary Tree with Guide</title>
+    <title>Binary Search Tree Manager</title>
     <style>
-        /* --- Minimal CSS --- */
         :root {
-            --bg-color: #fcfcfc;
+            --bg-color: #f8f9fa;
             --text-main: #2d3436;
+            --accent-pink: #ff7675;
             --accent-green: #6ab04c;
             --node-border: #dfe6e9;
         }
 
         body {
-            margin: 0;
-            padding: 40px 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            margin: 0; padding: 40px 20px;
+            display: flex; flex-direction: column; align-items: center;
             background-color: var(--bg-color);
-            font-family: 'Tahoma', sans-serif;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
             color: var(--text-main);
         }
 
         .container {
-            width: 100%;
-            max-width: 800px;
-            background: #ffffff;
-            padding: 30px;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.02);
+            width: 100%; max-width: 850px;
+            background: #ffffff; padding: 30px;
+            border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05);
             text-align: center;
         }
 
-        h1 { font-weight: 300; font-size: 1.5rem; margin-bottom: 25px; color: #ff7675; }
+        .db-badge {
+            font-size: 0.75rem; padding: 5px 12px;
+            border-radius: 15px; background: #eee; margin-bottom: 10px; display: inline-block;
+        }
+
+        h1 { font-weight: 600; font-size: 1.8rem; margin-bottom: 25px; color: var(--accent-pink); }
 
         .input-group { margin-bottom: 30px; display: flex; justify-content: center; gap: 10px; }
 
         input {
-            padding: 10px;
-            border: 1px solid var(--node-border);
-            border-radius: 8px;
-            width: 70px;
-            text-align: center;
-            outline: none;
+            padding: 10px; border: 2px solid var(--node-border);
+            border-radius: 10px; width: 80px; text-align: center; font-size: 1rem;
         }
 
         button {
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-            transition: 0.2s;
+            padding: 10px 20px; border-radius: 10px; border: none;
+            cursor: pointer; font-weight: bold; transition: 0.2s;
         }
 
-        .btn-add { background-color: #ff7675; color: white; }
+        .btn-add { background-color: var(--accent-pink); color: white; }
         .btn-clear { background-color: #dfe6e9; color: #636e72; }
-        button:hover { opacity: 0.8; }
+        button:hover { transform: translateY(-2px); opacity: 0.9; }
 
-        canvas { width: 100%; height: auto; margin-top: 20px; }
+        canvas { width: 100%; height: auto; background: #fff; border-radius: 15px; }
 
-        /* --- ส่วนที่เพิ่ม: Traversal Results & Guide --- */
         .results-section {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            text-align: left;
+            margin-top: 30px; padding-top: 20px;
+            border-top: 1px solid #eee; text-align: left;
         }
 
-        .result-item { margin-bottom: 10px; font-size: 0.95rem; }
-        .result-item b { color: var(--accent-green); margin-right: 10px; }
+        .result-item { margin-bottom: 8px; font-size: 0.95rem; }
+        .result-item b { color: var(--accent-green); width: 100px; display: inline-block; }
 
         .guide-section {
-            width: 100%;
-            max-width: 800px;
-            margin-top: 40px;
-            background: #f9fff9;
-            padding: 25px;
-            border-radius: 20px;
-            border: 1px solid #e1f0e1;
+            width: 100%; max-width: 850px; margin-top: 30px;
+            background: #f1f8e9; padding: 20px; border-radius: 15px;
         }
 
-        .guide-title {
-            color: var(--accent-green);
-            font-size: 1.2rem;
-            margin-bottom: 20px;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-        }
-
-        .guide-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-        }
-
-        .guide-item { display: flex; align-items: flex-start; gap: 12px; }
-        .icon-circle {
-            width: 32px; height: 32px;
-            background: #badc58;
-            border-radius: 50%;
-            display: flex; justify-content: center; align-items: center;
-            flex-shrink: 0; color: white; font-size: 0.8rem;
-        }
-
-        .guide-text b { display: block; color: #2d3436; margin-bottom: 2px; }
-        .guide-text span { font-size: 0.85rem; color: #636e72; }
+        .guide-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .guide-text b { color: #333; font-size: 0.9rem; }
+        .guide-text span { font-size: 0.8rem; color: #666; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1> 🎄Binary Tree🎄</h1>
+    <div class="db-badge"><?php echo $db_status; ?></div>
+    <h1>🎄 Binary Search Tree Visualizer</h1>
     
     <div class="input-group">
-        <input type="number" id="nodeInput" placeholder="เลข">
+        <input type="number" id="nodeInput" placeholder="ค่า" onkeyup="if(event.key==='Enter') addNode()">
         <button class="btn-add" onclick="addNode()">ปลูก Node</button>
         <button class="btn-clear" onclick="resetTree()">ล้างสวน</button>
     </div>
@@ -179,29 +144,10 @@ if ($res && $res->num_rows > 0) {
 </div>
 
 <div class="guide-section">
-    <div class="guide-title">หลักในการ Traversal</div>
     <div class="guide-grid">
-        <div class="guide-item">
-            <div class="icon-circle">⇄</div>
-            <div class="guide-text">
-                <b>Preorder</b>
-                <span>Root → Left → Right</span>
-            </div>
-        </div>
-        <div class="guide-item">
-            <div class="icon-circle" style="background:#badc5899"></div>
-            <div class="guide-text">
-                <b>Inorder</b>
-                <span>Left → Root → Right</span>
-            </div>
-        </div>
-        <div class="guide-item">
-            <div class="icon-circle" style="background:#badc5899"></div>
-            <div class="guide-text">
-                <b>Postorder</b>
-                <span>Left → Right → Root</span>
-            </div>
-        </div>
+        <div class="guide-text"><b>Preorder</b><br><span>Root → Left → Right</span></div>
+        <div class="guide-text"><b>Inorder</b><br><span>Left → Root → Right (Sorted)</span></div>
+        <div class="guide-text"><b>Postorder</b><br><span>Left → Right → Root</span></div>
     </div>
 </div>
 
@@ -214,46 +160,88 @@ if ($res && $res->num_rows > 0) {
     const canvas = document.getElementById('treeCanvas');
     const ctx = canvas.getContext('2d');
 
-    function addNode() {
-        const val = parseInt(document.getElementById('nodeInput').value);
-        if (isNaN(val)) return;
-        if (!root) root = new Node(val); else insertNode(root, val);
-        document.getElementById('nodeInput').value = '';
+    // โหลดข้อมูลเดิมจาก PHP เมื่อหน้าจอพร้อม
+    window.onload = () => {
+        const initialData = <?php echo json_encode($db_nodes); ?>;
+        initialData.forEach(val => {
+            buildLocalTree(val);
+        });
         render();
+    };
+
+    function buildLocalTree(val) {
+        if (!root) root = new Node(val); 
+        else insertNodeLogic(root, val);
     }
 
-    function insertNode(node, v) {
+    function insertNodeLogic(node, v) {
         if (v < node.val) {
-            if (!node.left) node.left = new Node(v); else insertNode(node.left, v);
-        } else {
-            if (!node.right) node.right = new Node(v); else insertNode(node.right, v);
+            if (!node.left) node.left = new Node(v); else insertNodeLogic(node.left, v);
+        } else if (v > node.val) {
+            if (!node.right) node.right = new Node(v); else insertNodeLogic(node.right, v);
         }
+    }
+
+    // ฟังก์ชันส่งข้อมูลไปเซฟ (AJAX)
+    async function addNode() {
+        const input = document.getElementById('nodeInput');
+        const val = parseInt(input.value);
+        if (isNaN(val)) return;
+
+        let formData = new FormData();
+        formData.append('action', 'add');
+        formData.append('value', val);
+
+        try {
+            await fetch(window.location.href, { method: 'POST', body: formData });
+            buildLocalTree(val);
+            input.value = '';
+            render();
+        } catch (e) { console.error("Save failed", e); }
+    }
+
+    async function resetTree() {
+        if(!confirm("ต้องการล้างข้อมูลทั้งหมดใช่หรือไม่?")) return;
+        
+        let formData = new FormData();
+        formData.append('action', 'clear');
+        
+        try {
+            await fetch(window.location.href, { method: 'POST', body: formData });
+            root = null;
+            render();
+        } catch (e) { console.error("Clear failed", e); }
     }
 
     function render() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (root) draw(root, canvas.width / 2, 40, 160);
+        if (root) draw(root, canvas.width / 2, 40, 180);
         updateTraversalText();
     }
 
     function draw(node, x, y, space) {
-        ctx.strokeStyle = "#dfe6e9"; ctx.lineWidth = 1;
         if (node.left) {
-            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - space, y + 70); ctx.stroke();
-            draw(node.left, x - space, y + 70, space / 1.8);
+            ctx.beginPath(); ctx.strokeStyle = "#ccc";
+            ctx.moveTo(x, y); ctx.lineTo(x - space, y + 60); ctx.stroke();
+            draw(node.left, x - space, y + 60, space / 2);
         }
         if (node.right) {
-            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + space, y + 70); ctx.stroke();
-            draw(node.right, x + space, y + 70, space / 1.8);
+            ctx.beginPath(); ctx.strokeStyle = "#ccc";
+            ctx.moveTo(x, y); ctx.lineTo(x + space, y + 60); ctx.stroke();
+            draw(node.right, x + space, y + 60, space / 2);
         }
-        ctx.beginPath(); ctx.arc(x, y, 18, 0, Math.PI * 2);
+        
+        // วาดวงกลม Node
+        ctx.beginPath();
+        ctx.arc(x, y, 18, 0, Math.PI * 2);
         ctx.fillStyle = "white"; ctx.fill();
-        ctx.strokeStyle = "#ff7675"; ctx.stroke();
-        ctx.fillStyle = "#2d3436"; ctx.font = "12px Arial"; ctx.textAlign = "center";
-        ctx.fillText(node.val, x, y + 5);
+        ctx.strokeStyle = "#ff7675"; ctx.lineWidth = 2; ctx.stroke();
+        
+        // วาดตัวเลข
+        ctx.fillStyle = "#2d3436"; ctx.font = "bold 13px Arial";
+        ctx.textAlign = "center"; ctx.fillText(node.val, x, y + 5);
     }
 
-    // Traversal Logic
     const getPre = (n, r=[]) => { if(n){ r.push(n.val); getPre(n.left, r); getPre(n.right, r); } return r; };
     const getIn = (n, r=[]) => { if(n){ getIn(n.left, r); r.push(n.val); getIn(n.right, r); } return r; };
     const getPost = (n, r=[]) => { if(n){ getPost(n.left, r); getPost(n.right, r); r.push(n.val); } return r; };
@@ -263,8 +251,6 @@ if ($res && $res->num_rows > 0) {
         document.getElementById('inText').innerText = getIn(root).join(' → ') || '-';
         document.getElementById('postText').innerText = getPost(root).join(' → ') || '-';
     }
-
-    function resetTree() { root = null; render(); }
 </script>
 
 </body>
